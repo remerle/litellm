@@ -808,3 +808,217 @@ def test_consolidate_anthropic_tool_results_no_content_list():
 
     # Messages should be unchanged
     assert result == messages
+
+
+# ==================== Surrogate Character Sanitization Tests ====================
+
+
+def test_sanitize_surrogate_characters_removes_lone_high_surrogate():
+    """Test that lone high surrogates are removed"""
+    from litellm.llms.github_copilot.common_utils import sanitize_surrogate_characters
+
+    # \ud83c is a high surrogate without its pair
+    text = "Hello \ud83c world"
+    result = sanitize_surrogate_characters(text)
+    assert result == "Hello  world"
+
+
+def test_sanitize_surrogate_characters_removes_lone_low_surrogate():
+    """Test that lone low surrogates are removed"""
+    from litellm.llms.github_copilot.common_utils import sanitize_surrogate_characters
+
+    # \udf00 is a low surrogate without its pair
+    text = "Hello \udf00 world"
+    result = sanitize_surrogate_characters(text)
+    assert result == "Hello  world"
+
+
+def test_sanitize_surrogate_characters_preserves_valid_pairs():
+    """Test that valid surrogate pairs (emojis) are preserved"""
+    from litellm.llms.github_copilot.common_utils import sanitize_surrogate_characters
+
+    # Valid emoji (flag) - \ud83c\udff4 is 🏴
+    text = "Hello 🏴 world"
+    result = sanitize_surrogate_characters(text)
+    assert result == "Hello 🏴 world"
+
+
+def test_sanitize_surrogate_characters_preserves_normal_text():
+    """Test that normal text without surrogates is unchanged"""
+    from litellm.llms.github_copilot.common_utils import sanitize_surrogate_characters
+
+    text = "Hello world! This is normal text with punctuation."
+    result = sanitize_surrogate_characters(text)
+    assert result == text
+
+
+def test_sanitize_surrogate_characters_preserves_simple_emojis():
+    """Test that simple emojis (BMP) are preserved"""
+    from litellm.llms.github_copilot.common_utils import sanitize_surrogate_characters
+
+    text = "Hello 😀 world"
+    result = sanitize_surrogate_characters(text)
+    assert result == "Hello 😀 world"
+
+
+def test_sanitize_surrogate_characters_handles_multiple_lone_surrogates():
+    """Test that multiple lone surrogates are all removed"""
+    from litellm.llms.github_copilot.common_utils import sanitize_surrogate_characters
+
+    # Multiple lone high and low surrogates
+    text = "Start \ud83c middle \udf00 end"
+    result = sanitize_surrogate_characters(text)
+    assert result == "Start  middle  end"
+
+
+def test_sanitize_messages_for_json_encoding_string_content():
+    """Test sanitizing messages with string content"""
+    from litellm.llms.github_copilot.common_utils import sanitize_messages_for_json_encoding
+
+    messages = [
+        {"role": "user", "content": "Hello \ud83c world"},
+        {"role": "assistant", "content": "Response with \udf00 surrogate"},
+    ]
+
+    result = sanitize_messages_for_json_encoding(messages)
+
+    assert result[0]["content"] == "Hello  world"
+    assert result[1]["content"] == "Response with  surrogate"
+    # Verify roles are preserved
+    assert result[0]["role"] == "user"
+    assert result[1]["role"] == "assistant"
+
+
+def test_sanitize_messages_for_json_encoding_list_content():
+    """Test sanitizing messages with list content (multi-part messages)"""
+    from litellm.llms.github_copilot.common_utils import sanitize_messages_for_json_encoding
+
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Hello \ud83c world"},
+                {"type": "text", "text": "Normal text"},
+            ]
+        }
+    ]
+
+    result = sanitize_messages_for_json_encoding(messages)
+
+    assert result[0]["content"][0]["text"] == "Hello  world"
+    assert result[0]["content"][1]["text"] == "Normal text"
+
+
+def test_sanitize_messages_for_json_encoding_tool_results():
+    """Test sanitizing tool result messages"""
+    from litellm.llms.github_copilot.common_utils import sanitize_messages_for_json_encoding
+
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_1",
+                    "content": "Tool output with \ud83c surrogate"
+                }
+            ]
+        }
+    ]
+
+    result = sanitize_messages_for_json_encoding(messages)
+
+    assert result[0]["content"][0]["content"] == "Tool output with  surrogate"
+    assert result[0]["content"][0]["tool_use_id"] == "toolu_1"
+
+
+def test_sanitize_messages_for_json_encoding_preserves_non_string_fields():
+    """Test that non-string fields are preserved"""
+    from litellm.llms.github_copilot.common_utils import sanitize_messages_for_json_encoding
+
+    messages = [
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "test", "arguments": '{"key": "value with \ud83c"}'}
+                }
+            ]
+        }
+    ]
+
+    result = sanitize_messages_for_json_encoding(messages)
+
+    assert result[0]["content"] is None
+    assert result[0]["tool_calls"][0]["id"] == "call_1"
+    # Arguments is a string, so surrogates should be removed
+    assert "\ud83c" not in result[0]["tool_calls"][0]["function"]["arguments"]
+
+
+def test_sanitize_messages_preserves_valid_emojis_in_content():
+    """Test that valid emojis in message content are preserved"""
+    from litellm.llms.github_copilot.common_utils import sanitize_messages_for_json_encoding
+
+    messages = [
+        {"role": "user", "content": "Hello 👋 world 🌍!"},
+    ]
+
+    result = sanitize_messages_for_json_encoding(messages)
+
+    assert result[0]["content"] == "Hello 👋 world 🌍!"
+
+
+def test_sanitize_messages_empty_list():
+    """Test sanitizing empty message list"""
+    from litellm.llms.github_copilot.common_utils import sanitize_messages_for_json_encoding
+
+    result = sanitize_messages_for_json_encoding([])
+    assert result == []
+
+
+def test_transform_messages_sanitizes_surrogates():
+    """Test that _transform_messages sanitizes surrogate characters"""
+    import litellm
+
+    config = GithubCopilotConfig()
+
+    # Save original value
+    original_flag = litellm.disable_copilot_system_to_assistant
+    try:
+        litellm.disable_copilot_system_to_assistant = True
+
+        messages = [
+            {"role": "user", "content": "Message with \ud83c lone surrogate"},
+            {"role": "assistant", "content": "Response with valid emoji 😀"},
+        ]
+
+        result = config._transform_messages(messages, model="github_copilot/gpt-4")
+
+        # Surrogate should be removed
+        assert "\ud83c" not in result[0]["content"]
+        assert "Message with  lone surrogate" == result[0]["content"]
+        # Valid emoji should be preserved
+        assert "😀" in result[1]["content"]
+    finally:
+        litellm.disable_copilot_system_to_assistant = original_flag
+
+
+def test_sanitize_messages_json_encodable_after_sanitization():
+    """Test that sanitized messages can be JSON encoded without errors"""
+    import json
+    from litellm.llms.github_copilot.common_utils import sanitize_messages_for_json_encoding
+
+    # Message with problematic surrogate that would cause JSON encoding to fail
+    messages = [
+        {"role": "user", "content": "Problem \ud83c text"},
+    ]
+
+    result = sanitize_messages_for_json_encoding(messages)
+
+    # This should not raise an exception
+    json_str = json.dumps(result)
+    assert "Problem" in json_str
+    assert "text" in json_str
