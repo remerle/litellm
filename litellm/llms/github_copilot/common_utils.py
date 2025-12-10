@@ -78,13 +78,13 @@ def get_copilot_default_headers(api_key: str) -> dict:
 
 def sanitize_surrogate_characters(text: str) -> str:
     """
-    Remove invalid UTF-16 surrogate characters from a string.
+    Replace invalid UTF-16 surrogate characters with the Unicode replacement character.
 
     Surrogate characters (U+D800 to U+DFFF) are used in UTF-16 encoding to represent
     characters outside the Basic Multilingual Plane (BMP). However, lone surrogates
     (high surrogates without low surrogates or vice versa) are invalid in UTF-8.
 
-    This function removes:
+    This function replaces with U+FFFD (�):
     - High surrogates (U+D800-U+DBFF) not followed by low surrogates
     - Low surrogates (U+DC00-U+DFFF) not preceded by high surrogates
 
@@ -92,12 +92,12 @@ def sanitize_surrogate_characters(text: str) -> str:
         text: The string to sanitize
 
     Returns:
-        The sanitized string with invalid surrogates removed
+        The sanitized string with invalid surrogates replaced by U+FFFD
     """
-    # Remove high surrogates not followed by low surrogates
-    text = re.sub(r"[\uD800-\uDBFF](?![\uDC00-\uDFFF])", "", text)
-    # Remove low surrogates not preceded by high surrogates
-    text = re.sub(r"(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]", "", text)
+    # Replace high surrogates not followed by low surrogates
+    text = re.sub(r"[\uD800-\uDBFF](?![\uDC00-\uDFFF])", "\uFFFD", text)
+    # Replace low surrogates not preceded by high surrogates
+    text = re.sub(r"(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]", "\uFFFD", text)
     return text
 
 

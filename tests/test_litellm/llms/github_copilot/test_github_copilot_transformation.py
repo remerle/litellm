@@ -813,24 +813,24 @@ def test_consolidate_anthropic_tool_results_no_content_list():
 # ==================== Surrogate Character Sanitization Tests ====================
 
 
-def test_sanitize_surrogate_characters_removes_lone_high_surrogate():
-    """Test that lone high surrogates are removed"""
+def test_sanitize_surrogate_characters_replaces_lone_high_surrogate():
+    """Test that lone high surrogates are replaced with U+FFFD"""
     from litellm.llms.github_copilot.common_utils import sanitize_surrogate_characters
 
     # \ud83c is a high surrogate without its pair
     text = "Hello \ud83c world"
     result = sanitize_surrogate_characters(text)
-    assert result == "Hello  world"
+    assert result == "Hello \uFFFD world"
 
 
-def test_sanitize_surrogate_characters_removes_lone_low_surrogate():
-    """Test that lone low surrogates are removed"""
+def test_sanitize_surrogate_characters_replaces_lone_low_surrogate():
+    """Test that lone low surrogates are replaced with U+FFFD"""
     from litellm.llms.github_copilot.common_utils import sanitize_surrogate_characters
 
     # \udf00 is a low surrogate without its pair
     text = "Hello \udf00 world"
     result = sanitize_surrogate_characters(text)
-    assert result == "Hello  world"
+    assert result == "Hello \uFFFD world"
 
 
 def test_sanitize_surrogate_characters_preserves_valid_pairs():
@@ -862,13 +862,13 @@ def test_sanitize_surrogate_characters_preserves_simple_emojis():
 
 
 def test_sanitize_surrogate_characters_handles_multiple_lone_surrogates():
-    """Test that multiple lone surrogates are all removed"""
+    """Test that multiple lone surrogates are all replaced with U+FFFD"""
     from litellm.llms.github_copilot.common_utils import sanitize_surrogate_characters
 
     # Multiple lone high and low surrogates
     text = "Start \ud83c middle \udf00 end"
     result = sanitize_surrogate_characters(text)
-    assert result == "Start  middle  end"
+    assert result == "Start \uFFFD middle \uFFFD end"
 
 
 def test_sanitize_messages_for_json_encoding_string_content():
@@ -882,8 +882,8 @@ def test_sanitize_messages_for_json_encoding_string_content():
 
     result = sanitize_messages_for_json_encoding(messages)
 
-    assert result[0]["content"] == "Hello  world"
-    assert result[1]["content"] == "Response with  surrogate"
+    assert result[0]["content"] == "Hello \uFFFD world"
+    assert result[1]["content"] == "Response with \uFFFD surrogate"
     # Verify roles are preserved
     assert result[0]["role"] == "user"
     assert result[1]["role"] == "assistant"
@@ -905,7 +905,7 @@ def test_sanitize_messages_for_json_encoding_list_content():
 
     result = sanitize_messages_for_json_encoding(messages)
 
-    assert result[0]["content"][0]["text"] == "Hello  world"
+    assert result[0]["content"][0]["text"] == "Hello \uFFFD world"
     assert result[0]["content"][1]["text"] == "Normal text"
 
 
@@ -928,7 +928,7 @@ def test_sanitize_messages_for_json_encoding_tool_results():
 
     result = sanitize_messages_for_json_encoding(messages)
 
-    assert result[0]["content"][0]["content"] == "Tool output with  surrogate"
+    assert result[0]["content"][0]["content"] == "Tool output with \uFFFD surrogate"
     assert result[0]["content"][0]["tool_use_id"] == "toolu_1"
 
 
@@ -997,9 +997,9 @@ def test_transform_messages_sanitizes_surrogates():
 
         result = config._transform_messages(messages, model="github_copilot/gpt-4")
 
-        # Surrogate should be removed
+        # Surrogate should be replaced with U+FFFD
         assert "\ud83c" not in result[0]["content"]
-        assert "Message with  lone surrogate" == result[0]["content"]
+        assert result[0]["content"] == "Message with \uFFFD lone surrogate"
         # Valid emoji should be preserved
         assert "😀" in result[1]["content"]
     finally:
