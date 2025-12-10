@@ -1,7 +1,8 @@
 """
 Constants for Copilot integration
 """
-from typing import Optional, Union
+import re
+from typing import Any, Dict, List, Optional, Union
 from uuid import uuid4
 
 import httpx
@@ -73,3 +74,124 @@ def get_copilot_default_headers(api_key: str) -> dict:
         "x-request-id": str(uuid4()),
         "x-vscode-user-agent-library-version": "electron-fetch",
     }
+
+
+def sanitize_surrogate_characters(text: str) -> str:
+    """
+    Replace invalid UTF-16 surrogate characters with the Unicode replacement character.
+
+    Surrogate characters (U+D800 to U+DFFF) are used in UTF-16 encoding to represent
+    characters outside the Basic Multilingual Plane (BMP). However, lone surrogates
+    (high surrogates without low surrogates or vice versa) are invalid in UTF-8.
+
+    This function replaces with U+FFFD (�):
+    - High surrogates (U+D800-U+DBFF) not followed by low surrogates
+    - Low surrogates (U+DC00-U+DFFF) not preceded by high surrogates
+
+    Args:
+        text: The string to sanitize
+
+    Returns:
+        The sanitized string with invalid surrogates replaced by U+FFFD
+    """
+    # Replace high surrogates not followed by low surrogates
+    text = re.sub(r"[\uD800-\uDBFF](?![\uDC00-\uDFFF])", "\uFFFD", text)
+    # Replace low surrogates not preceded by high surrogates
+    text = re.sub(r"(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]", "\uFFFD", text)
+    return text
+
+
+def sanitize_messages_for_json_encoding(
+    messages: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """
+    Sanitize message content to remove invalid surrogate characters that would
+    cause JSON encoding errors when sending to GitHub Copilot.
+
+    This handles the error:
+    'utf-8' codec can't encode character '\\ud83c' in position X: surrogates not allowed
+
+    Args:
+        messages: List of message dictionaries with potential surrogate characters
+
+    Returns:
+        Messages with surrogate characters removed from string content
+    """
+    sanitized_messages: List[Dict[str, Any]] = []
+
+    for message in messages:
+        sanitized_message = _sanitize_message_content(message)
+        sanitized_messages.append(sanitized_message)
+
+    return sanitized_messages
+
+
+def _sanitize_message_content(message: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Recursively sanitize a single message's content for surrogate characters.
+
+    Args:
+        message: A message dictionary
+
+    Returns:
+        A new message dictionary with sanitized content
+    """
+    sanitized: Dict[str, Any] = {}
+
+    for key, value in message.items():
+        if key == "content":
+            sanitized[key] = _sanitize_content_value(value)
+        elif isinstance(value, dict):
+            sanitized[key] = _sanitize_message_content(value)
+        elif isinstance(value, list):
+            sanitized[key] = _sanitize_list_value(value)
+        elif isinstance(value, str):
+            sanitized[key] = sanitize_surrogate_characters(value)
+        else:
+            sanitized[key] = value
+
+    return sanitized
+
+
+def _sanitize_content_value(content: Any) -> Any:
+    """
+    Sanitize a content field value which can be a string, list, or other type.
+
+    Args:
+        content: The content value to sanitize
+
+    Returns:
+        Sanitized content value
+    """
+    if isinstance(content, str):
+        return sanitize_surrogate_characters(content)
+    elif isinstance(content, list):
+        return _sanitize_list_value(content)
+    elif isinstance(content, dict):
+        return _sanitize_message_content(content)
+    return content
+
+
+def _sanitize_list_value(items: List[Any]) -> List[Any]:
+    """
+    Sanitize a list of items, handling content blocks recursively.
+
+    Args:
+        items: List of items to sanitize
+
+    Returns:
+        Sanitized list of items
+    """
+    sanitized_items: List[Any] = []
+
+    for item in items:
+        if isinstance(item, dict):
+            sanitized_items.append(_sanitize_message_content(item))
+        elif isinstance(item, str):
+            sanitized_items.append(sanitize_surrogate_characters(item))
+        elif isinstance(item, list):
+            sanitized_items.append(_sanitize_list_value(item))
+        else:
+            sanitized_items.append(item)
+
+    return sanitized_items

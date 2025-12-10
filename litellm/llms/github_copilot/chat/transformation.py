@@ -5,7 +5,11 @@ from litellm.llms.openai.openai import OpenAIConfig
 from litellm.types.llms.openai import AllMessageValues
 
 from ..authenticator import Authenticator
-from ..common_utils import GetAPIKeyError, GITHUB_COPILOT_API_BASE
+from ..common_utils import (
+    GetAPIKeyError,
+    GITHUB_COPILOT_API_BASE,
+    sanitize_messages_for_json_encoding,
+)
 
 
 class GithubCopilotConfig(OpenAIConfig):
@@ -56,6 +60,10 @@ class GithubCopilotConfig(OpenAIConfig):
         # Consolidate duplicate tool results for Claude models on GitHub Copilot
         # GitHub Copilot's Claude API expects each tool_use to have exactly one tool_result
         messages = self._consolidate_tool_results(messages)
+
+        # Sanitize messages to remove invalid surrogate characters that would cause
+        # JSON encoding errors ('utf-8' codec can't encode character: surrogates not allowed)
+        messages = sanitize_messages_for_json_encoding(messages)
 
         return messages
 
